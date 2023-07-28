@@ -336,13 +336,45 @@ if __name__ == '__main__':
     print(f"Number of posts: {posts_count}")
     print("\n========================================\n")
 
-    # Print the top 10 posts by likes after the latest threadmark
-    print("Top 10 posts by likes after the latest threadmark: ", end='')
+    # # Print the top 10 posts by likes after the latest threadmark
+    # print("Top 10 posts by likes after the latest threadmark: ", end='')
+    # threadmarked_posts = get_posts_by_threadmark(posts_list, True)
+    # latest_post = get_latest_post(threadmarked_posts)
+    # print(f"{latest_post['content']}")
+    # print("\n========================================\n")
+    # posts_after_latest = get_posts_after_number(posts_list, latest_post['post_number'])
+    # posts_after_latest_sorted = sort_posts_by_likes(posts_after_latest)
+    # for post in posts_after_latest_sorted[:10]:
+    #     print_post_details(post)
+
+    # For each threadmark, print the top 3 liked posts after it but before the next threadmark
     threadmarked_posts = get_posts_by_threadmark(posts_list, True)
-    latest_post = get_latest_post(threadmarked_posts)
-    print(f"{latest_post['content']}")
-    print("\n========================================\n")
-    posts_after_latest = get_posts_after_number(posts_list, latest_post['post_number'])
-    posts_after_latest_sorted = sort_posts_by_likes(posts_after_latest)
-    for post in posts_after_latest_sorted[:10]:
-        print_post_details(post)
+    threadmarked_posts.sort(key=lambda x: x['post_number'])
+    for i in range(len(threadmarked_posts)):
+        # Get the current threadmark
+        threadmark = threadmarked_posts[i]
+
+        # Get the posts after the current threadmark
+        posts_after_threadmark = get_posts_after_number(posts_list, threadmark['post_number'])
+
+        # Get the next threadmark
+        if i == len(threadmarked_posts) - 1:
+            next_threadmark = None
+        else:
+            next_threadmark = threadmarked_posts[i + 1]
+
+        # Get the posts before the next threadmark
+        if next_threadmark is None:
+            posts_before_next_threadmark = posts_after_threadmark
+        else:
+            posts_before_next_threadmark = list(filter(lambda x: x['post_number'] < next_threadmark['post_number'], posts_after_threadmark))
+
+        # Sort the posts by likes
+        posts_before_next_threadmark_sorted = sort_posts_by_likes(posts_before_next_threadmark)
+
+        # Print the top 3 posts
+        print(f"Top 3 posts after threadmark {threadmark['content']}:")
+        print("\n========================================\n")
+        for post in posts_before_next_threadmark_sorted[:3]:
+            print_post_details(post)
+        print("\n========================================\n")
