@@ -1,9 +1,9 @@
-import requests
+import requests, threading, queue, datetime, json
 from bs4 import BeautifulSoup
-import threading, queue
 
 posts_list = []
 link_queue = queue.Queue()
+num_threads = 8
 
 url = 'https://forums.spacebattles.com/threads/i-want-to-help-worm-mcu-post-gm.992435'
 
@@ -65,6 +65,7 @@ def extract_post_stats(post):
     # Find the a tag
     # Get the text
     post_number = post.find('header').findChildren(recursive=False)[-1].findChildren(recursive=False)[-1].find('a').get_text()
+    post_number = post_number.strip()
     # Remove the # from the post number
     post_number = post_number[1:]
     # Convert the post number to an integer
@@ -95,6 +96,89 @@ def extract_post_stats(post):
     }
     # print(post_stats)
     return post_stats
+
+# Only works for the first page
+def extract_story_stats(content):
+    # Extract the main stats for the story
+    print("Extracting main stats...")
+    soup = BeautifulSoup(content, 'html.parser')
+
+    # Get the title
+    title = soup.find('title').get_text()
+
+    # Get the author
+    # Find the tag that has the text: Thread starter
+    # Then get the next tag
+    # Then get the text
+    author = soup.find(string='Thread starter').find_next().get_text()
+
+    # Get the start date and time
+    # Find the tag that has the text: Created at
+    # Then get the next tag
+    # Then get the datetime attribute
+    start_date = soup.find(string='Created at').find_next().time['datetime']
+    # Format the date from 2021-08-31T18:00:00+00:00 to DD/MM/YYYY HH:MM
+    start_date = datetime.datetime.strptime(start_date, '%Y-%m-%dT%H:%M:%S%z')
+    start_date = start_date.strftime('%d/%m/%Y %H:%M')
+
+    # Get the number of watchers
+    # Find the tag that has the text: Watchers
+    # Then get the next tag
+    # Then get the text
+    watchers = soup.find(string='Watchers').find_next().get_text()
+
+    # Get the number of Recent readers
+    # Find the tag that has the text: Recent readers
+    # Then get the next tag
+    # Then get the text
+    recent_readers = soup.find(string='Recent readers').find_next().get_text()
+
+    # Get the Threadmark stats
+    # Find the tag that has the atribute: data-xf-init="threadmarks-toggle-storage"
+    # Then get the child tag
+    # Then get the text
+    threadmark_stats = soup.find(attrs={'data-xf-init': 'threadmarks-toggle-storage'}).findChild().get_text()
+    # Convert the text Statistics (8 threadmarks, 20k words) to threadmarks = 8 and words = 20k
+    threadmarks = threadmark_stats.split(',')[0].split()[1]
+    threadmarks = threadmarks.split(' ')[0][1:]
+    threadmarks = int(threadmarks)
+
+    word_count = threadmark_stats.split(',')[1].split()[0]
+    word_count = word_count.split(' ')[0]
+
+    # Get the number of pages
+    # Find the tags that has the atribute: calss="pageNavSimple-el pageNavSimple-el--current"
+    # Select the first tag
+    # Then get the text
+    pages = soup.find(attrs={'class': 'pageNavSimple-el pageNavSimple-el--current'}).get_text()
+    # Convert the text 1 of 17 to 17
+    pages = pages.split()[-1]
+    pages = int(pages)
+
+    story_stats = {
+        'title': title,
+        'author': author,
+        'start_date': start_date,
+        'watchers': watchers,
+        'recent_readers': recent_readers,
+        'threadmarks': threadmarks,
+        'word_count': word_count,
+        'pages': pages
+    }
+
+    # Print the data
+    print(f"Title: {title}")
+    print(f"Author: {author}")
+    print(f"Start date: {start_date}")
+    print(f"Watchers: {watchers}")
+    print(f"Recent readers: {recent_readers}")
+    print(f"Threadmarks: {threadmarks}")
+    print(f"Words: {word_count}")
+    print(f"Pages: {pages}")
+
+    print("\n========================================\n")
+
+    return story_stats
 
 def extract_content_from_link(link):
     print(f"Getting {link}...", end=' ')
@@ -131,6 +215,18 @@ def extract_posts_from_content(content, page_num = -1):
 
     return posts
 
+def store_content_to_file(content, filename):
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+# Given a story url and the number of pages, generate a list of links to each page
+def generate_links(story_url, num_pages, start_page = 1):
+    links = []
+    for i in range(start_page, num_pages + 1):
+        link = story_url + f'/page-{i}'
+        links.append(link)
+    return links
+
 # Worker thread function that given a queue of links, extracts the posts from each link and adds them to the global list
 def post_extraction_worker_thread(link_queue):
     global posts_list
@@ -163,175 +259,90 @@ def post_extraction_worker_thread(link_queue):
     # Mark the task as done
     link_queue.task_done()
 
+    # Exit the thread
+    return
 
-print(f"Getting {url}...", end=' ')
-r = requests.get(url)
-# print(f"Status code: {r.status_code}")
-if r.status_code != 200:
-    print(f"Error: {r.status_code}")
-    exit()
-print("Done")
+def load_posts_from_web(url):
+    # Get the contents of the url
+    contents = extract_content_from_link(url)
 
-# Store the contents in a file
-filename = 'spacebattles.html'
+    # Store the contents in a file
+    # store_content_to_file(contents, 'spacebattles.html')
 
-# with open(filename, 'w', encoding='utf-8') as f:
-#     f.write(r.text)
+    # Extract the story stats from the contents
+    story_stats = extract_story_stats(contents)
 
-# # Process the file
-# with open(filename, encoding='utf-8') as f:
-#     contents = f.read()
+    # Generate the links for all the pages
+    links = generate_links(url, story_stats['pages'], 1)
 
-contents = r.text
+    # Add all the links to the link_queue
+    for link in links:
+        link_queue.put(link)
 
-# Extract the main stats for the story
-print("Extracting main stats...")
-soup = BeautifulSoup(contents, 'html.parser')
+    # Create the worker threads
+    for i in range(num_threads):
+        t = threading.Thread(target=post_extraction_worker_thread, args=(link_queue,))
+        t.start()
 
-# Get the title
-title = soup.find('title').get_text()
+    # Wait for all the tasks to be done
+    link_queue.join()
 
-# Get the author
-# Find the tag that has the text: Thread starter
-# Then get the next tag
-# Then get the text
-author = soup.find(string='Thread starter').find_next().get_text()
+def load_posts_from_file(filename):
+    global posts_list
+    with open(filename, 'r', encoding='utf-8') as f:
+        posts_list = json.load(f)
 
-# Get the start date and time
-# Find the tag that has the text: Created at
-# Then get the next tag
-# Then get the datetime attribute
-start_date = soup.find(string='Created at').find_next().time['datetime']
-# Format the date from 2021-08-31T18:00:00+00:00 to DD/MM/YYYY HH:MM
-import datetime
-start_date = datetime.datetime.strptime(start_date, '%Y-%m-%dT%H:%M:%S%z')
-start_date = start_date.strftime('%d/%m/%Y %H:%M')
+def print_post_details(post):
+    print(f"Author: {post['author']}")
+    print(f"Threadmark: {post['is_threadmark']}")
+    print(f"Post id: {post['id']}")
+    print(f"Post number: {post['post_number']}")
+    print(f"Date: {post['date']}")
+    print(f"Likes: {post['likes']}")
+    print(f"Content: {post['content']}")
+    print("\n---- ---- ----\n")
 
-# Get the number of watchers
-# Find the tag that has the text: Watchers
-# Then get the next tag
-# Then get the text
-watchers = soup.find(string='Watchers').find_next().get_text()
+def get_posts_by_author(posts, author):
+    return list(filter(lambda x: x['author'] == author, posts))
 
-# Get the number of Recent readers
-# Find the tag that has the text: Recent readers
-# Then get the next tag
-# Then get the text
-recent_readers = soup.find(string='Recent readers').find_next().get_text()
+def get_posts_by_threadmark(posts, threadmark):
+    return list(filter(lambda x: x['is_threadmark'] == threadmark, posts))
 
-# Get the Threadmark stats
-# Find the tag that has the atribute: data-xf-init="threadmarks-toggle-storage"
-# Then get the child tag
-# Then get the text
-threadmark_stats = soup.find(attrs={'data-xf-init': 'threadmarks-toggle-storage'}).findChild().get_text()
-# Convert the text Statistics (8 threadmarks, 20k words) to threadmarks = 8 and words = 20k
-threadmarks = threadmark_stats.split(',')[0].split()[1]
-threadmarks = threadmarks.split(' ')[0][1:]
-threadmarks = int(threadmarks)
+def get_latest_post(posts):
+    return max(posts, key=lambda x: x['post_number'])
 
-word_count = threadmark_stats.split(',')[1].split()[0]
-word_count = word_count.split(' ')[0]
+def get_posts_after_number(posts, post_number):
+    return list(filter(lambda x: x['post_number'] > post_number, posts))
 
-# Get the number of pages
-# Find the tags that has the atribute: calss="pageNavSimple-el pageNavSimple-el--current"
-# Select the first tag
-# Then get the text
-pages = soup.find(attrs={'class': 'pageNavSimple-el pageNavSimple-el--current'}).get_text()
-# Convert the text 1 of 17 to 17
-pages = pages.split()[-1]
-pages = int(pages)
+def sort_posts_by_likes(posts):
+    return sorted(posts, key=lambda x: x['likes'], reverse=True)
 
-# Print the data
-print(f"Title: {title}")
-print(f"Author: {author}")
-print(f"Start date: {start_date}")
-print(f"Watchers: {watchers}")
-print(f"Recent readers: {recent_readers}")
-print(f"Threadmarks: {threadmarks}")
-print(f"Words: {word_count}")
-print(f"Pages: {pages}")
+if __name__ == '__main__':
 
-print("\n========================================\n")
-
-# Generate the links for all the pages
-# url + /page-n
-# n = 1 to pages
-# Store the links in a list
-links = []
-# for n in range(30, pages + 1):
-for n in range(pages + 1):
-    links.append(url + f'/page-{n}')
-
-# Get the contents of all the pages
-# Store the contents in a list
-contents = []
-# contents.append(r.text)
-for link in links:
-    print(f"Getting {link}...", end=' ')
-    r = requests.get(link)
-    if r.status_code != 200:
-        print(f"Error: {r.status_code}")
-        exit()
-    print("Done")
-    contents.append(r.text)
-
-# From all the pages, extract all the posts and their stats
-# Store the stats in a list
-posts = []
-# for content in contents:
-for i, content in enumerate(contents):
-    print("Extracting posts from page", i + 1, "...", end=' ')
-    soup = BeautifulSoup(content, 'html.parser')
-
-    # Get all the posts
-    # page_posts = soup.find_all('article', class_=lambda x: x and 'message--post' in x)
-    # Find the tag with the class="block-body js-replyNewMessageContainer"
-    # Get all its children, which are the posts
-    # Store the posts in a list
-    parent_tag = soup.find(attrs={'class': 'block-body js-replyNewMessageContainer'})
-    page_posts = parent_tag.findChildren('article', recursive=False)
-
-    # For each post, extract the stats
-    for post in page_posts:
-        post_stats = extract_post_stats(post)
-
-        # Add the stats to the list
-        posts.append(post_stats)
+    # load_posts_from_web(url)
     
-    print("Done")
+    # # Sort the list by post_number
+    # posts_list.sort(key=lambda x: x['post_number'])
 
-# Get the number of posts
-# Get the length of the list
-posts_count = len(posts)
-print(f"Number of posts: {posts_count}")
+    # # Save the list to a file
+    # with open('posts.json', 'w', encoding='utf-8') as f:
+    #     json.dump(posts_list, f, ensure_ascii=False, indent=4)
 
-print("\n========================================\n")
 
-# Print the details of 10 non-threadmark posts with the most likes
-# Sort the list by likes
-posts.sort(key=lambda x: x['likes'], reverse=True)
+    load_posts_from_file('posts.json')
 
-# Filter the list to only include non-threadmark posts
-non_threadmark_posts = [post for post in posts if not post['is_threadmark']]
+    # Get the number of posts
+    posts_count = len(posts_list)
+    print(f"Number of posts: {posts_count}")
+    print("\n========================================\n")
 
-# Print the details of the first 10 posts
-print("Details of 10 non-threadmark posts with the most likes:\n")
-for post in non_threadmark_posts[:10]:
-    print(f"Author: {post['author']}")
-    print(f"Post id: {post['id']}")
-    print(f"Date: {post['date']}")
-    print(f"Likes: {post['likes']}")
-    print(f"Content: {post['content']}")
-    print()
-
-# Print the details of all threadmark posts
-# Filter the list to only include threadmark posts
-threadmark_posts = [post for post in posts if post['is_threadmark']]
-print("Details of all threadmark posts:")
-for post in threadmark_posts:
-    print(f"Author: {post['author']}")
-    print(f"Post id: {post['id']}")
-    print(f"Date: {post['date']}")
-    print(f"Likes: {post['likes']}")
-    print(f"Content: {post['content']}")
-    print()
+    # Print the top 10 posts by likes after the latest threadmark
+    print("Top 10 posts by likes after the latest threadmark: ", end='')
+    threadmarked_posts = get_posts_by_threadmark(posts_list, True)
+    latest_post = get_latest_post(threadmarked_posts)
+    print(f"{latest_post['content']}")
+    print("\n========================================\n")
+    posts_after_latest = get_posts_after_number(posts_list, latest_post['post_number'])
+    posts_after_latest_sorted = sort_posts_by_likes(posts_after_latest)
+    for post in posts_after_latest_sorted[:10]:
+        print_post_details(post)
