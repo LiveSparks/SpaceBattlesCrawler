@@ -2,6 +2,12 @@
 # SpaceBattlesCrawler
 This script can be used to crawl a single story on [forums.spacebattles.com](forums.spacebattles.com) and extract all the posts.
 The main purpose for me to write the script was to mainly sort posts by likes to see what people were engaging with.
+## Requirements
+1. Pyhton3
+2. BeautifulSoup4
+	```
+	pip install beautifulsoup4
+	```
 ## Usage
  1. Change story URL
 	 Change the URL in `main.py` near the top of the file.
