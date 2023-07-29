@@ -2,6 +2,7 @@ import requests, threading, queue, datetime, json, os
 from bs4 import BeautifulSoup
 
 posts_list = []
+story_stats = {}
 link_queue = queue.Queue()
 num_threads = 8
 
@@ -99,6 +100,7 @@ def extract_post_stats(post):
 
 # Only works for the first page
 def extract_story_stats(content):
+    global story_stats
     # Extract the main stats for the story
     print("Extracting main stats...")
     soup = BeautifulSoup(content, 'html.parser')
@@ -166,27 +168,29 @@ def extract_story_stats(content):
         'pages': pages
     }
 
-    # Print the data
-    print(f"Title: {title}")
-    print(f"Author: {author}")
-    print(f"Start date: {start_date}")
-    print(f"Watchers: {watchers}")
-    print(f"Recent readers: {recent_readers}")
-    print(f"Threadmarks: {threadmarks}")
-    print(f"Words: {word_count}")
-    print(f"Pages: {pages}")
+    # Save the story stats to a file
+    with open('story_stats.json', 'w') as f:
+        json.dump(story_stats, f)
 
-    print("\n========================================\n")
-
-    return story_stats
+def print_story_stats():
+    global story_stats
+    print("\n=============STORY STATS================")
+    print(f"Title: {story_stats['title']}")
+    print(f"Author: {story_stats['author']}")
+    print(f"Start date: {story_stats['start_date']}")
+    print(f"Watchers: {story_stats['watchers']}")
+    print(f"Recent readers: {story_stats['recent_readers']}")
+    print(f"Threadmarks: {story_stats['threadmarks']}")
+    print(f"Words: {story_stats['word_count']}")
+    print(f"Pages: {story_stats['pages']}")
+    print("========================================\n")
 
 def extract_content_from_link(link):
-    print(f"Getting {link}...", end=' ')
+    print(f"Getting {link}...")
     r = requests.get(link)
     if r.status_code != 200:
-        print(f"Error: {r.status_code}")
+        print(f"Failed to get {link} :: Error: {r.status_code}")
         exit()
-    print("Done")
     # contents.append(r.text)
     return r.text
 
@@ -270,7 +274,8 @@ def load_posts_from_web(url):
     # store_content_to_file(contents, 'spacebattles.html')
 
     # Extract the story stats from the contents
-    story_stats = extract_story_stats(contents)
+    extract_story_stats(contents)
+    print_story_stats()
 
     # Generate the links for all the pages
     links = generate_links(url, story_stats['pages'], 1)
@@ -317,6 +322,16 @@ def load_posts_from_file(filename):
     with open(filename, 'r', encoding='utf-8') as f:
         posts_list = json.load(f)
 
+def load_story_stats_from_file(filename):
+    global story_stats
+    # Check if the file exists
+    if not os.path.isfile(filename):
+        print(f"File {filename} does not exist")
+        return
+    
+    with open(filename, 'r', encoding='utf-8') as f:
+        story_stats = json.load(f)
+
 def print_post_details(post):
     print(f"Author: {post['author']}")
     print(f"Threadmark: {post['is_threadmark']}")
@@ -354,7 +369,7 @@ def check_for_new_updates():
     contents = extract_content_from_link(url)
 
     # Extract the story stats from the contents
-    story_stats = extract_story_stats(contents)
+    extract_story_stats(contents)
 
     # Get the number of pages
     num_pages = story_stats['pages']
@@ -393,6 +408,9 @@ def check_for_new_updates():
         # Get the new posts
         new_posts = get_posts_after_number(posts_list, latest_post_in_file_number)
 
+        # Print story stats
+        print_story_stats()
+
         # Print the new posts
         for post in new_posts:
             print_post_details(post)
@@ -400,7 +418,7 @@ def check_for_new_updates():
     else:
         print("No new posts")
 
-def print_top_replies_by_likes(posts, num_replies):
+def print_top_posts_by_likes(posts, num_replies):
     # Get the top replies by likes
     top_replies = sort_posts_by_likes(posts)[:num_replies]
 
@@ -415,7 +433,7 @@ def print_top_replies_by_likes_for_latest_threadmark(num_replies):
     print(f"{latest_post['content']}")
     print("\n========================================\n")
     posts_after_latest = get_posts_after_number(posts_list, latest_post['post_number'])
-    print_top_replies_by_likes(posts_after_latest, num_replies)
+    print_top_posts_by_likes(posts_after_latest, num_replies)
 
 def print_top_replies_by_likes_for_each_threadmark(num_replies):
     threadmarked_posts = get_posts_by_threadmark(posts_list, True)
@@ -449,9 +467,13 @@ def print_top_replies_by_likes_for_each_threadmark(num_replies):
         print("\n========================================")
         print(f"{threadmark['content']}:: Replies: {len(posts_before_next_threadmark)}")
         print("========================================\n")
-        print_top_replies_by_likes(posts_before_next_threadmark_sorted, num_replies)
+        print_top_posts_by_likes(posts_before_next_threadmark_sorted, num_replies)
 
 if __name__ == '__main__':
+
+    ## ====
+    ## Three different ways to load posts. Uncomment the one you want to use.
+    ## ====
 
     # load_posts_from_web(url)
     # load_posts_from_file('posts.json')
@@ -462,6 +484,14 @@ if __name__ == '__main__':
     print(f"Number of posts: {posts_count}")
     print("\n========================================\n")
 
+    ## ====
+    ## Examples of how to use the functions.
+    ## ====
+
     # print_top_replies_by_likes(posts_list, 10)
     # print_top_replies_by_likes_for_latest_threadmark(10)
     print_top_replies_by_likes_for_each_threadmark(2)
+
+    ## Print the top 10 liked non-threadmarked posts. Uncomment the lines below to use.
+    # non_threadmarked_posts = get_posts_by_threadmark(posts_list, False)
+    # print_top_replies_by_likes(non_threadmarked_posts, 10)
