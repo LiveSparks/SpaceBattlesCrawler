@@ -476,8 +476,8 @@ if __name__ == '__main__':
     ## ====
 
     # load_posts_from_web(url)
-    # load_posts_from_file('posts.json')
-    check_for_new_updates()
+    load_posts_from_file('posts.json')
+    # check_for_new_updates()
 
     # Get the number of posts
     posts_count = len(posts_list)
@@ -495,3 +495,21 @@ if __name__ == '__main__':
     ## Print the top 10 liked non-threadmarked posts. Uncomment the lines below to use.
     # non_threadmarked_posts = get_posts_by_threadmark(posts_list, False)
     # print_top_replies_by_likes(non_threadmarked_posts, 10)
+
+    ## Get users with the most likes on non-threadmarked posts. Uncomment the lines below to use.
+    # non_threadmarked_posts = get_posts_by_threadmark(posts_list, False)
+    # users = {}
+    # for post in non_threadmarked_posts:
+    #     if post['author'] in users:
+    #         users[post['author']] += post['likes']
+    #     else:
+    #         users[post['author']] = post['likes']
+    # users = sorted(users.items(), key=lambda x: x[1], reverse=True)
+    # print(f"Number of users: {len(users)}")
+    # print("Users with the most likes on non-threadmarked posts:\n")
+    # for user in users[:10]:
+    #     print(f"Username: {user[0]}, Likes: {user[1]}")
+    #     print("Most liked post:",)
+    #     user_posts = get_posts_by_author(non_threadmarked_posts, user[0])
+    #     user_posts = sort_posts_by_likes(user_posts)
+    #     print_post_details(user_posts[0])
