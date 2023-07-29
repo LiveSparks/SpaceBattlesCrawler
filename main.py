@@ -279,13 +279,33 @@ def load_posts_from_web(url):
     for link in links:
         link_queue.put(link)
 
+    # Clear the posts_list
+    posts_list.clear()
+
     # Create the worker threads
+    threads = []
     for i in range(num_threads):
         t = threading.Thread(target=post_extraction_worker_thread, args=(link_queue,))
         t.start()
+        threads.append(t)
 
     # Wait for all the tasks to be done
     link_queue.join()
+
+    # Add None to the queue to signal the threads to exit
+    for i in range(num_threads):
+        link_queue.put(None)
+
+    # Wait for all the threads to exit
+    for t in threads:
+        t.join()
+
+    # Sort the list by post_number
+    posts_list.sort(key=lambda x: x['post_number'])
+
+    # Save the list to a file
+    with open('posts.json', 'w', encoding='utf-8') as f:
+        json.dump(posts_list, f, ensure_ascii=False, indent=4)
 
 def load_posts_from_file(filename):
     global posts_list
@@ -317,39 +337,81 @@ def get_posts_after_number(posts, post_number):
 def sort_posts_by_likes(posts):
     return sorted(posts, key=lambda x: x['likes'], reverse=True)
 
-if __name__ == '__main__':
+def check_for_new_updates():
+    # Get story stats from the web
+    # Get the contents of the url
+    contents = extract_content_from_link(url)
 
-    # load_posts_from_web(url)
-    
-    # # Sort the list by post_number
-    # posts_list.sort(key=lambda x: x['post_number'])
+    # Extract the story stats from the contents
+    story_stats = extract_story_stats(contents)
 
-    # # Save the list to a file
-    # with open('posts.json', 'w', encoding='utf-8') as f:
-    #     json.dump(posts_list, f, ensure_ascii=False, indent=4)
+    # Get the number of pages
+    num_pages = story_stats['pages']
 
+    # Generate the link for the latest page
+    latest_page_link = url + f'/page-{num_pages}'
+    print(f"Latest page link: {latest_page_link}")
 
+    # Get the contents of the latest page
+    latest_page_contents = extract_content_from_link(latest_page_link)
+
+    # Extract the posts from the latest page
+    latest_page_posts = extract_posts_from_content(latest_page_contents, num_pages)
+
+    # Get the latest post
+    latest_post = get_latest_post(latest_page_posts)
+
+    # Get the latest post number
+    latest_post_number = latest_post['post_number']
+
+    # load the posts from the file
     load_posts_from_file('posts.json')
 
-    # Get the number of posts
-    posts_count = len(posts_list)
-    print(f"Number of posts: {posts_count}")
+    # Get the post number of the latest post in the file
+    latest_post_in_file = get_latest_post(posts_list)
+    latest_post_in_file_number = latest_post_in_file['post_number']
+
+    # Check if there are any new posts
+    if latest_post_number > latest_post_in_file_number:
+        print("There are new posts!")
+        print(f"Number of new posts: {latest_post_number - latest_post_in_file_number}")
+
+        # Reload the posts from the web
+        load_posts_from_web(url)
+
+        # Get the new posts
+        new_posts = get_posts_after_number(posts_list, latest_post_in_file_number)
+
+        # Print the new posts
+        for post in new_posts:
+            print_post_details(post)
+
+    else:
+        print("No new posts")
+
+def print_top_replies_by_likes(posts, num_replies):
+    # Get the top replies by likes
+    top_replies = sort_posts_by_likes(posts)[:num_replies]
+
+    # Print the top replies
+    for reply in top_replies:
+        print_post_details(reply)
+
+def print_top_replies_by_likes_for_latest_threadmark(num_replies):
+    print("Top 10 posts by likes after the latest threadmark: ", end='')
+    threadmarked_posts = get_posts_by_threadmark(posts_list, True)
+    latest_post = get_latest_post(threadmarked_posts)
+    print(f"{latest_post['content']}")
     print("\n========================================\n")
+    posts_after_latest = get_posts_after_number(posts_list, latest_post['post_number'])
+    print_top_replies_by_likes(posts_after_latest, num_replies)
 
-    # # Print the top 10 posts by likes after the latest threadmark
-    # print("Top 10 posts by likes after the latest threadmark: ", end='')
-    # threadmarked_posts = get_posts_by_threadmark(posts_list, True)
-    # latest_post = get_latest_post(threadmarked_posts)
-    # print(f"{latest_post['content']}")
-    # print("\n========================================\n")
-    # posts_after_latest = get_posts_after_number(posts_list, latest_post['post_number'])
-    # posts_after_latest_sorted = sort_posts_by_likes(posts_after_latest)
-    # for post in posts_after_latest_sorted[:10]:
-    #     print_post_details(post)
-
-    # For each threadmark, print the top 3 liked posts after it but before the next threadmark
+def print_top_replies_by_likes_for_each_threadmark(num_replies):
     threadmarked_posts = get_posts_by_threadmark(posts_list, True)
     threadmarked_posts.sort(key=lambda x: x['post_number'])
+
+    print(f"Number of threadmarks: {len(threadmarked_posts)}")
+    print(f"Printing top {num_replies} replies for each threadmark:")
     for i in range(len(threadmarked_posts)):
         # Get the current threadmark
         threadmark = threadmarked_posts[i]
@@ -372,9 +434,23 @@ if __name__ == '__main__':
         # Sort the posts by likes
         posts_before_next_threadmark_sorted = sort_posts_by_likes(posts_before_next_threadmark)
 
-        # Print the top 3 posts
-        print(f"Top 3 posts after threadmark {threadmark['content']}:")
-        print("\n========================================\n")
-        for post in posts_before_next_threadmark_sorted[:3]:
-            print_post_details(post)
-        print("\n========================================\n")
+        # Print the top posts
+        print("\n========================================")
+        print(f"{threadmark['content']}:: Replies: {len(posts_before_next_threadmark)}")
+        print("========================================\n")
+        print_top_replies_by_likes(posts_before_next_threadmark_sorted, num_replies)
+
+if __name__ == '__main__':
+
+    # load_posts_from_web(url)
+    # load_posts_from_file('posts.json')
+    check_for_new_updates()
+
+    # Get the number of posts
+    posts_count = len(posts_list)
+    print(f"Number of posts: {posts_count}")
+    print("\n========================================\n")
+
+    # print_top_replies_by_likes(posts_list, 10)
+    # print_top_replies_by_likes_for_latest_threadmark(10)
+    print_top_replies_by_likes_for_each_threadmark(1)
