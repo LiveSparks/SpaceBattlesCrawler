@@ -1,4 +1,4 @@
-import requests, threading, queue, datetime, json
+import requests, threading, queue, datetime, json, os
 from bs4 import BeautifulSoup
 
 posts_list = []
@@ -309,6 +309,11 @@ def load_posts_from_web(url):
 
 def load_posts_from_file(filename):
     global posts_list
+    # Check if the file exists
+    if not os.path.isfile(filename):
+        print(f"File {filename} does not exist")
+        return
+    
     with open(filename, 'r', encoding='utf-8') as f:
         posts_list = json.load(f)
 
@@ -338,6 +343,12 @@ def sort_posts_by_likes(posts):
     return sorted(posts, key=lambda x: x['likes'], reverse=True)
 
 def check_for_new_updates():
+    # Check if the file exists
+    if not os.path.isfile('posts.json'):
+        print("File posts.json does not exist. Getting posts from the web.")
+        load_posts_from_web(url)
+        return
+    
     # Get story stats from the web
     # Get the contents of the url
     contents = extract_content_from_link(url)
@@ -453,4 +464,4 @@ if __name__ == '__main__':
 
     # print_top_replies_by_likes(posts_list, 10)
     # print_top_replies_by_likes_for_latest_threadmark(10)
-    print_top_replies_by_likes_for_each_threadmark(1)
+    print_top_replies_by_likes_for_each_threadmark(2)
