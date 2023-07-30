@@ -199,7 +199,7 @@ def extract_content_from_link(link):
     return r.text
 
 def extract_posts_from_content(content, page_num = -1):
-    print("Extracting posts from page", page_num, "...", end=' ')
+    print("Extracting posts from page", page_num)
     soup = BeautifulSoup(content, 'html.parser')
 
     # Get all the posts
@@ -218,8 +218,6 @@ def extract_posts_from_content(content, page_num = -1):
 
         # Add the stats to the list
         posts.append(post_stats)
-    
-    print("Done")
 
     return posts
 
@@ -263,9 +261,6 @@ def post_extraction_worker_thread(link_queue):
 
         # Mark the task as done
         link_queue.task_done()
-
-    # Mark the task as done
-    link_queue.task_done()
 
     # Exit the thread
     return
@@ -492,7 +487,7 @@ if __name__ == '__main__':
     ## Examples of how to use the functions.
     ## ====
 
-    # print_top_replies_by_likes(posts_list, 10)
+    print_top_posts_by_likes(posts_list, 10)
     # print_top_replies_by_likes_for_latest_threadmark(10)
     # print_top_replies_by_likes_for_each_threadmark(2)
 
