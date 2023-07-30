@@ -69,6 +69,8 @@ def extract_post_stats(post):
     post_number = post_number.strip()
     # Remove the # from the post number
     post_number = post_number[1:]
+    # Remove any commas from the post number
+    post_number = post_number.replace(',', '')
     # Convert the post number to an integer
     post_number = int(post_number)
 
@@ -80,6 +82,8 @@ def extract_post_stats(post):
         post_likes = 0
     else:
         post_likes = post_likes.get_text()
+        # Remove any commas from the likes number
+        post_likes = post_likes.replace(',', '')
         post_likes = int(post_likes)
 
     # post_likes = post.find(attrs={'class': 'sv-rating__count'}).get_text()
@@ -476,13 +480,13 @@ if __name__ == '__main__':
     ## ====
 
     # load_posts_from_web(url)
-    load_posts_from_file('posts.json')
-    # check_for_new_updates()
+    # load_posts_from_file('posts.json')
+    check_for_new_updates()
 
-    # Get the number of posts
-    posts_count = len(posts_list)
-    print(f"Number of posts: {posts_count}")
-    print("\n========================================\n")
+    # # Get the number of posts
+    # posts_count = len(posts_list)
+    # print(f"Number of posts: {posts_count}")
+    # print("\n========================================\n")
 
     ## ====
     ## Examples of how to use the functions.
@@ -490,7 +494,7 @@ if __name__ == '__main__':
 
     # print_top_replies_by_likes(posts_list, 10)
     # print_top_replies_by_likes_for_latest_threadmark(10)
-    print_top_replies_by_likes_for_each_threadmark(2)
+    # print_top_replies_by_likes_for_each_threadmark(2)
 
     ## Print the top 10 liked non-threadmarked posts. Uncomment the lines below to use.
     # non_threadmarked_posts = get_posts_by_threadmark(posts_list, False)
