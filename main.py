@@ -1,12 +1,14 @@
-import requests, threading, queue, datetime, json, os
+import requests, threading, queue, datetime, json, os, time, random
 from bs4 import BeautifulSoup
 
 posts_list = []
 story_stats = {}
 link_queue = queue.Queue()
-num_threads = 8
+num_threads = 20
 
-url = 'https://forums.spacebattles.com/threads/i-want-to-help-worm-mcu-post-gm.992435'
+# url = 'https://forums.spacebattles.com/threads/i-want-to-help-worm-mcu-post-gm.992435'
+# url = 'https://forums.spacebattles.com/threads/opalescent-reflections.1081287'
+url = 'https://forums.spacebattles.com/threads/skitterdoc-2077-worm-cyberpunk-2077-crossover.1052653'
 
 def extract_post_stats(post):
     # Get the author
@@ -54,9 +56,13 @@ def extract_post_stats(post):
     # Find the header tag
     # Find the time tag
     # Then get the datetime attribute
+    # Format of Date is ISO8601 (example: 2021-08-31T18:00:00+00:00)
     post_date = post.find('header').find('time')['datetime']
-    # Format the date from 2021-08-31T18:00:00+00:00 to DD/MM/YYYY HH:MM
+    # Convert the date to a datetime object
     post_date = datetime.datetime.strptime(post_date, '%Y-%m-%dT%H:%M:%S%z')
+    # Convert to UTC time
+    post_date = post_date.astimezone(datetime.timezone.utc)
+    # Format the date to DD/MM/YYYY HH:MM string
     post_date = post_date.strftime('%d/%m/%Y %H:%M')
 
     # Get the post number
@@ -194,7 +200,11 @@ def extract_content_from_link(link):
     r = requests.get(link)
     if r.status_code != 200:
         print(f"Failed to get {link} :: Error: {r.status_code}")
-        exit()
+        if r.status_code == 429:
+            print("Sleeping for some seconds...")
+            time.sleep(random.randint(10, 20))
+            return extract_content_from_link(link)
+        return None
     # contents.append(r.text)
     return r.text
 
@@ -247,6 +257,11 @@ def post_extraction_worker_thread(link_queue):
 
         # Get the contents of the link
         content = extract_content_from_link(link)
+
+        # If the content is None, skip this link
+        if content is None:
+            link_queue.task_done()
+            continue
 
         # Extract page number from the link
         # Find the last instance of 'page-' in the link
@@ -512,3 +527,33 @@ if __name__ == '__main__':
     #     user_posts = get_posts_by_author(non_threadmarked_posts, user[0])
     #     user_posts = sort_posts_by_likes(user_posts)
     #     print_post_details(user_posts[0])
+
+    ## Get the time slots with the most non-threadmark posts. Time slots are half an hour long.
+    # non_threadmarked_posts = get_posts_by_threadmark(posts_list, False)
+    # time_slots = {}
+    # # Populate the time slots dictionary
+    # for i in range(24):
+    #     for j in range(2):
+    #         time_slots[f"{i}:{j}"] = 0
+
+    # for post in non_threadmarked_posts:
+    #     time = post['date']
+    #     # Convert DD/MM/YYYY HH:MM to datetime object
+    #     time = datetime.datetime.strptime(time, '%d/%m/%Y %H:%M')
+    #     time_slot = f"{time.hour}:{time.minute // 30}"
+    #     if time_slot in time_slots:
+    #         time_slots[time_slot] += 1
+    #     else:
+    #         time_slots[time_slot] = 1
+    
+    # # Generate a graph of the time slots
+    # for time_slot in time_slots:
+    #     print(f"{time_slot}: ", end='')
+    #     for i in range(int(time_slots[time_slot]/5)):
+    #         print("#", end='')
+    #     print()
+
+    ## Print the contents and time of the threadmarks
+    # threadmarked_posts = get_posts_by_threadmark(posts_list, True)
+    # for post in threadmarked_posts:
+    #     print(f"{post['content']}: {post['date']}")
