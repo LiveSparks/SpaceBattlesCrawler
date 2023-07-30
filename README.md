@@ -1,5 +1,4 @@
-
-# SpaceBattlesCrawler
+# Story Engagement Analysis Tool for SpaceBattles
 This script can be used to crawl a single story on [forums.spacebattles.com](forums.spacebattles.com) and extract all the posts.
 The main purpose for me to write the script was to mainly sort posts by likes to see what people were engaging with.
 ## Requirements
