@@ -1,14 +1,20 @@
-import requests, threading, queue, datetime, json, os, time, random
+import requests, threading, queue, datetime, json, os, time, random, re
 from bs4 import BeautifulSoup
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+}
 
 posts_list = []
 story_stats = {}
 link_queue = queue.Queue()
 num_threads = 20
 
-# url = 'https://forums.spacebattles.com/threads/i-want-to-help-worm-mcu-post-gm.992435'
 # url = 'https://forums.spacebattles.com/threads/opalescent-reflections.1081287'
-url = 'https://forums.spacebattles.com/threads/skitterdoc-2077-worm-cyberpunk-2077-crossover.1052653'
+# url = 'https://forums.spacebattles.com/threads/skitterdoc-2077-worm-cyberpunk-2077-crossover.1052653'
+url = 'https://forums.spacebattles.com/threads/i-want-to-help-worm-mcu-post-gm.992435'
 
 def extract_post_stats(post):
     # Get the author
@@ -57,13 +63,17 @@ def extract_post_stats(post):
     # Find the time tag
     # Then get the datetime attribute
     # Format of Date is ISO8601 (example: 2021-08-31T18:00:00+00:00)
-    post_date = post.find('header').find('time')['datetime']
-    # Convert the date to a datetime object
-    post_date = datetime.datetime.strptime(post_date, '%Y-%m-%dT%H:%M:%S%z')
-    # Convert to UTC time
-    post_date = post_date.astimezone(datetime.timezone.utc)
-    # Format the date to DD/MM/YYYY HH:MM string
-    post_date = post_date.strftime('%d/%m/%Y %H:%M')
+    time_tag = post.find('header').find('time') if post.find('header') else None
+    if time_tag and time_tag.get('datetime'):
+        post_date = time_tag['datetime']
+        # Convert the date to a datetime object
+        post_date = datetime.datetime.strptime(post_date, '%Y-%m-%dT%H:%M:%S%z')
+        # Convert to UTC time
+        post_date = post_date.astimezone(datetime.timezone.utc)
+        # Format the date to DD/MM/YYYY HH:MM string
+        post_date = post_date.strftime('%d/%m/%Y %H:%M')
+    else:
+        post_date = 'Unknown'
 
     # Get the post number
     # Find the header tag
@@ -71,14 +81,25 @@ def extract_post_stats(post):
     # Find the last child tag
     # Find the a tag
     # Get the text
-    post_number = post.find('header').findChildren(recursive=False)[-1].findChildren(recursive=False)[-1].find('a').get_text()
-    post_number = post_number.strip()
-    # Remove the # from the post number
-    post_number = post_number[1:]
-    # Remove any commas from the post number
-    post_number = post_number.replace(',', '')
-    # Convert the post number to an integer
-    post_number = int(post_number)
+    post_number = 0
+    try:
+        post_number = post.find('header').findChildren(recursive=False)[-1].findChildren(recursive=False)[-1].find('a').get_text()
+        post_number = post_number.strip()
+        # Remove the # from the post number
+        post_number = post_number[1:]
+        # Remove any commas from the post number
+        post_number = post_number.replace(',', '')
+        # Convert the post number to an integer
+        post_number = int(post_number)
+    except (AttributeError, IndexError, ValueError):
+        # Fallback: try to parse the post number from the post id attribute
+        try:
+            post_id_str = post.get('id', '')
+            m = re.search(r'(\d+)$', post_id_str)
+            if m:
+                post_number = int(m.group(1))
+        except (AttributeError, ValueError):
+            post_number = 0
 
     # Get the number of likes
     # Find the tag that has the attribute: class="sv-rating__count"
@@ -122,50 +143,72 @@ def extract_story_stats(content):
     # Find the tag that has the text: Thread starter
     # Then get the next tag
     # Then get the text
-    author = soup.find(string='Thread starter').find_next().get_text()
+    thread_starter = soup.find(string='Thread starter')
+    author = thread_starter.find_next().get_text() if thread_starter else 'Unknown'
 
     # Get the start date and time
     # Find the tag that has the text: Created at
     # Then get the next tag
     # Then get the datetime attribute
-    start_date = soup.find(string='Created at').find_next().time['datetime']
-    # Format the date from 2021-08-31T18:00:00+00:00 to DD/MM/YYYY HH:MM
-    start_date = datetime.datetime.strptime(start_date, '%Y-%m-%dT%H:%M:%S%z')
-    start_date = start_date.strftime('%d/%m/%Y %H:%M')
+    created_at = soup.find(string='Created at')
+    if created_at:
+        start_date = created_at.find_next().time['datetime']
+        # Format the date from 2021-08-31T18:00:00+00:00 to DD/MM/YYYY HH:MM
+        start_date = datetime.datetime.strptime(start_date, '%Y-%m-%dT%H:%M:%S%z')
+        start_date = start_date.strftime('%d/%m/%Y %H:%M')
+    else:
+        start_date = 'Unknown'
 
     # Get the number of watchers
     # Find the tag that has the text: Watchers
     # Then get the next tag
     # Then get the text
-    watchers = soup.find(string='Watchers').find_next().get_text()
+    watchers_tag = soup.find(string='Watchers')
+    watchers = watchers_tag.find_next().get_text() if watchers_tag else 'Unknown'
 
     # Get the number of Recent readers
     # Find the tag that has the text: Recent readers
     # Then get the next tag
     # Then get the text
-    recent_readers = soup.find(string='Recent readers').find_next().get_text()
+    recent_readers_tag = soup.find(string='Recent readers')
+    recent_readers = recent_readers_tag.find_next().get_text() if recent_readers_tag else 'Unknown'
 
     # Get the Threadmark stats
-    # Find the tag that has the atribute: data-xf-init="threadmarks-toggle-storage"
-    # Then get the child tag
-    # Then get the text
-    threadmark_stats = soup.find(attrs={'data-xf-init': 'threadmarks-toggle-storage'}).findChild().get_text()
-    # Convert the text Statistics (8 threadmarks, 20k words) to threadmarks = 8 and words = 20k
-    threadmarks = threadmark_stats.split(',')[0].split()[1]
-    threadmarks = threadmarks.split(' ')[0][1:]
-    threadmarks = int(threadmarks)
-
-    word_count = threadmark_stats.split(',')[1].split()[0]
-    word_count = word_count.split(' ')[0]
+    # Find the span that has the attribute: data-xf-init="threadmarks-toggle-storage"
+    # or class="collapseTrigger collapseTrigger--block"
+    # Then get the child tag text and parse threadmark count and word count
+    threadmarks = 0
+    word_count = 'Unknown'
+    threadmark_tag = soup.find(attrs={'data-xf-init': 'threadmarks-toggle-storage'})
+    if threadmark_tag is None:
+        threadmark_tag = soup.find('span', class_='collapseTrigger collapseTrigger--block')
+    if threadmark_tag:
+        threadmark_stats = threadmark_tag.get_text()
+        # Format: "Statistics (8 threadmarks, 20k words)"
+        m_count = re.search(r'\((\d+)\s+threadmark', threadmark_stats)
+        if m_count:
+            threadmarks = int(m_count.group(1))
+        m_words = re.search(r'([\d.,]+[kKmM]?)\s+words', threadmark_stats)
+        if m_words:
+            word_count = m_words.group(1)
 
     # Get the number of pages
-    # Find the tags that has the atribute: calss="pageNavSimple-el pageNavSimple-el--current"
-    # Select the first tag
-    # Then get the text
-    pages = soup.find(attrs={'class': 'pageNavSimple-el pageNavSimple-el--current'}).get_text()
-    # Convert the text 1 of 17 to 17
-    pages = pages.split()[-1]
-    pages = int(pages)
+    # Try the simple page nav first ("X of Y"), then fall back to the last
+    # numbered link in the full page navigator.
+    pages = 1
+    page_nav_current = soup.find(attrs={'class': 'pageNavSimple-el pageNavSimple-el--current'})
+    if page_nav_current:
+        # Text is like "1 of 17"
+        pages = int(page_nav_current.get_text().split()[-1])
+    else:
+        # Fallback: find the last page-N link in pageNav-main
+        page_nav_main = soup.find('ul', class_='pageNav-main')
+        if page_nav_main:
+            page_links = page_nav_main.find_all('a', href=re.compile(r'page-\d+'))
+            if page_links:
+                m = re.search(r'page-(\d+)', page_links[-1]['href'])
+                if m:
+                    pages = int(m.group(1))
 
     story_stats = {
         'title': title,
@@ -197,7 +240,7 @@ def print_story_stats():
 
 def extract_content_from_link(link):
     print(f"Getting {link}...")
-    r = requests.get(link)
+    r = requests.get(link, headers=HEADERS)
     if r.status_code != 200:
         print(f"Failed to get {link} :: Error: {r.status_code}")
         if r.status_code == 429:
@@ -237,6 +280,7 @@ def store_content_to_file(content, filename):
 
 # Given a story url and the number of pages, generate a list of links to each page
 def generate_links(story_url, num_pages, start_page = 1):
+    story_url = story_url.rstrip('/')
     links = []
     for i in range(start_page, num_pages + 1):
         link = story_url + f'/page-{i}'
