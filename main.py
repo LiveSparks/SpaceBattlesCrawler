@@ -1,14 +1,21 @@
-import requests, threading, queue, datetime, json, os, time, random
+import requests, threading, queue, datetime, json, os, time, random, re
 from bs4 import BeautifulSoup
 
 posts_list = []
 story_stats = {}
 link_queue = queue.Queue()
-num_threads = 20
+num_threads = 8
 
-# url = 'https://forums.spacebattles.com/threads/i-want-to-help-worm-mcu-post-gm.992435'
+# Mimic a real browser to avoid bot-detection blocks
+REQUEST_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+}
+
+url = 'https://forums.spacebattles.com/threads/i-want-to-help-worm-mcu-post-gm.992435'
 # url = 'https://forums.spacebattles.com/threads/opalescent-reflections.1081287'
-url = 'https://forums.spacebattles.com/threads/skitterdoc-2077-worm-cyberpunk-2077-crossover.1052653'
+# url = 'https://forums.spacebattles.com/threads/skitterdoc-2077-worm-cyberpunk-2077-crossover.1052653'
 
 def extract_post_stats(post):
     # Get the author
@@ -24,33 +31,31 @@ def extract_post_stats(post):
     # Check if class attribute contains: hasThreadmark
     is_threadmark = 'hasThreadmark' in post['class']
 
-    # If the post is a threadmark, get the threadmark title
+    # Extract the threadmark title if this is a threadmark post
+    post_title = None
     if is_threadmark:
-        # Find the label tag
-        # Then get the next tag
-        # Then get the text
+        # The label contains the threadmark category (e.g. 'Threadmarks')
+        # The span immediately after the label contains the chapter title
         post_label = post.find('label')
-        post_content = post_label.get_text() + ":: "
-        post_content += post_label.find_next().get_text()
+        post_title = post_label.find_next('span').get_text().strip()
 
-    # If the post is not a threadmark, get the post content
+    # Extract the full post content from the bbWrapper div (present for all posts)
+    bb_wrapper = post.find(attrs={'class': 'bbWrapper'})
+    if bb_wrapper:
+        post_content = bb_wrapper.get_text()
     else:
-        # Find the div tag that has the attribute: class="bbWrapper"
-        # Then get the text
-        post_content = post.find(attrs={'class': 'bbWrapper'}).get_text()
+        post_content = ''
 
-        # Replace 'Click to expand...' and 'Click to shrink...'
-        post_content = post_content.replace('Click to expand...', '')
-        post_content = post_content.replace('Click to shrink...', '[End Quote]')
+    # Replace 'Click to expand...' and 'Click to shrink...'
+    post_content = post_content.replace('Click to expand...', '')
+    post_content = post_content.replace('Click to shrink...', '[End Quote]')
 
-        # Clean up the post contents such that there are no more that two consecutive newlines and no more than two consecutive \t
-        # Find all instances of \t\t\t and replace with \t\t
-        while '\t\t\t' in post_content:
-            post_content = post_content.replace('\t\t\t', '\t\t')
-        
-        # Find all instances of \n\n\n and replace with \n\n
-        while '\n\n\n' in post_content:
-            post_content = post_content.replace('\n\n\n', '\n\n')
+    # Clean up: collapse runs of tabs and newlines
+    while '\t\t\t' in post_content:
+        post_content = post_content.replace('\t\t\t', '\t\t')
+    while '\n\n\n' in post_content:
+        post_content = post_content.replace('\n\n\n', '\n\n')
+    post_content = post_content.strip()
 
     # Get the date and time
     # Find the header tag
@@ -100,7 +105,8 @@ def extract_post_stats(post):
         'author': post_author,
         'id': post_id,
         'is_threadmark': is_threadmark,
-        'content': post_content,
+        'title': post_title,       # threadmark title (e.g. 'Chapter 01'), None for regular posts
+        'content': post_content,   # full post text for all posts
         'date': post_date,
         'post_number': post_number,
         'likes': post_likes
@@ -125,11 +131,13 @@ def extract_story_stats(content):
     author = soup.find(string='Thread starter').find_next().get_text()
 
     # Get the start date and time
-    # Find the tag that has the text: Created at
-    # Then get the next tag
-    # Then get the datetime attribute
-    start_date = soup.find(string='Created at').find_next().time['datetime']
-    # Format the date from 2021-08-31T18:00:00+00:00 to DD/MM/YYYY HH:MM
+    # XenForo changed the label from 'Created at' to 'Start date'
+    start_date_label = soup.find(string='Start date') or soup.find(string='Created at')
+    start_date_el = start_date_label.find_next()
+    # The time tag may be the element itself or nested inside a link
+    time_tag = start_date_el if start_date_el.name == 'time' else start_date_el.find('time')
+    start_date = time_tag['datetime']
+    # Format the date from ISO8601 to DD/MM/YYYY HH:MM
     start_date = datetime.datetime.strptime(start_date, '%Y-%m-%dT%H:%M:%S%z')
     start_date = start_date.strftime('%d/%m/%Y %H:%M')
 
@@ -150,13 +158,14 @@ def extract_story_stats(content):
     # Then get the child tag
     # Then get the text
     threadmark_stats = soup.find(attrs={'data-xf-init': 'threadmarks-toggle-storage'}).findChild().get_text()
-    # Convert the text Statistics (8 threadmarks, 20k words) to threadmarks = 8 and words = 20k
-    threadmarks = threadmark_stats.split(',')[0].split()[1]
-    threadmarks = threadmarks.split(' ')[0][1:]
-    threadmarks = int(threadmarks)
-
-    word_count = threadmark_stats.split(',')[1].split()[0]
-    word_count = word_count.split(' ')[0]
+    # Parse 'Statistics (8 threadmarks, 20k words)' using regex
+    tm_match = re.search(r'\((\d+)\s+threadmarks?,\s*([\d\.]+\w*)\s+words?\)', threadmark_stats)
+    if tm_match:
+        threadmarks = int(tm_match.group(1))
+        word_count = tm_match.group(2)
+    else:
+        threadmarks = 0
+        word_count = '0'
 
     # Get the number of pages
     # Find the tags that has the atribute: calss="pageNavSimple-el pageNavSimple-el--current"
@@ -197,7 +206,7 @@ def print_story_stats():
 
 def extract_content_from_link(link):
     print(f"Getting {link}...")
-    r = requests.get(link)
+    r = requests.get(link, headers=REQUEST_HEADERS)
     if r.status_code != 200:
         print(f"Failed to get {link} :: Error: {r.status_code}")
         if r.status_code == 429:
@@ -205,7 +214,6 @@ def extract_content_from_link(link):
             time.sleep(random.randint(10, 20))
             return extract_content_from_link(link)
         return None
-    # contents.append(r.text)
     return r.text
 
 def extract_posts_from_content(content, page_num = -1):
@@ -444,7 +452,8 @@ def print_top_replies_by_likes_for_latest_threadmark(num_replies):
     print("Top 10 posts by likes after the latest threadmark: ", end='')
     threadmarked_posts = get_posts_by_threadmark(posts_list, True)
     latest_post = get_latest_post(threadmarked_posts)
-    print(f"{latest_post['content']}")
+    display_title = latest_post.get('title') or latest_post['content'][:80]
+    print(f"{display_title}")
     print("\n========================================\n")
     posts_after_latest = get_posts_after_number(posts_list, latest_post['post_number'])
     print_top_posts_by_likes(posts_after_latest, num_replies)
@@ -479,9 +488,30 @@ def print_top_replies_by_likes_for_each_threadmark(num_replies):
 
         # Print the top posts
         print("\n========================================")
-        print(f"{threadmark['content']}:: Replies: {len(posts_before_next_threadmark)}")
+        display_title = threadmark.get('title') or threadmark['content'][:80]
+        print(f"{display_title} :: Replies: {len(posts_before_next_threadmark)}")
         print("========================================\n")
         print_top_posts_by_likes(posts_before_next_threadmark_sorted, num_replies)
+
+def save_chapters_as_markdown(posts, output_dir='chapters'):
+    """Export each threadmarked post as a separate Markdown file."""
+    threadmarks = get_posts_by_threadmark(posts, True)
+    threadmarks.sort(key=lambda x: x['post_number'])
+    os.makedirs(output_dir, exist_ok=True)
+    saved = 0
+    for post in threadmarks:
+        title = post.get('title') or f"post_{post['post_number']}"
+        # Build a filesystem-safe filename
+        safe_name = re.sub(r'[^\w\s-]', '', title).strip()
+        safe_name = re.sub(r'\s+', '_', safe_name)
+        filepath = os.path.join(output_dir, f'{safe_name}.md')
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(f'# {title}\n\n')
+            f.write(post['content'])
+        print(f'Saved: {filepath}')
+        saved += 1
+    print(f'\nSaved {saved} chapters to ./{output_dir}/')
+
 
 if __name__ == '__main__':
 
@@ -502,7 +532,10 @@ if __name__ == '__main__':
     ## Examples of how to use the functions.
     ## ====
 
-    print_top_posts_by_likes(posts_list, 10)
+    # Save all threadmarked chapters as Markdown files
+    save_chapters_as_markdown(posts_list)
+
+    # print_top_posts_by_likes(posts_list, 10)
     # print_top_replies_by_likes_for_latest_threadmark(10)
     # print_top_replies_by_likes_for_each_threadmark(2)
 
